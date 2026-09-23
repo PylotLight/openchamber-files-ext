@@ -8,12 +8,16 @@ The host bundles `panel/main.js` (IIFE) — OpenChamber never compiles the TS so
 `mountOnce` appends six regions to `#root` (flex column, full height):
 
 ```
-toolbar → search → tree → splitter → editor → status
+toolbar → search → body(tree → splitter → editor) → status
 ```
 
 - `styleUi` injects one `<style>` block (tree rows, chips, CodeMirror host, crumbs).
 - `styleEls` sets flex layout inline styles and wires tree click + splitter drag listeners.
-- `showEditor` toggles tree/editor flex split; tree height clamped to 80 px – 75 % of root.
+- `els.body` is the orientation container: `flex-direction: column` for stacked
+  (tree above editor), `row` for side-by-side. `applySplit` flips it plus the
+  splitter axis/cursor and the editor border, then calls `showEditor`.
+- `showEditor` toggles tree/editor flex split per orientation; tree size clamped to
+  80 px – 75 % of root height (stacked) or 160 px – 60 % of root width (side-by-side).
 
 ## State
 
@@ -26,6 +30,7 @@ toolbar → search → tree → splitter → editor → status
 | `query` | search filter (120 ms debounced repaint) |
 | `cm`, `cmHost`, `editorPath` | single shared CodeMirror instance, rebound per active tab |
 | `treeHeight` | tree pane px, persisted as host storage key `"editorHeight"` (historical name) |
+| `split` / `treeWidth` | `"horizontal"` (stacked) vs `"vertical"` (side-by-side), toggled by the `Layout:` toolbar button; tree width persisted as `"treeWidth"` |
 | `paintGen` | generation counter — stale async tree paints bail out |
 
 UI paths are host-relative (`""` = root); `hostPath()` maps them to host form

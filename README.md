@@ -13,25 +13,43 @@ A **Files panel extension for [OpenChamber](https://openchamber.ai)** — browse
 - **Multi-tab editor** — open several files, dirty dots, Save / Reload / Close, `Ctrl/Cmd+S` to save
 - **Syntax highlighting** (JS/TS, JSON/JSONC, HTML, CSS, Markdown, Python, YAML, Shell, TOML, INI, SQL, Go, Rust, Ruby)
 - **Draggable splitter** above the editor — height is remembered across sessions
+- **Layout toggle** (`Layout: Stacked / Side-by-side` in the toolbar) — tree above
+  editor, or tree left of editor; choice and both pane sizes persist
 - **Folder styling** — 📁 icons + bold labels so dirs stand out from files
 - Follows **project switches**; status bar shows root, open file, unsaved state
 
+## Settings
+
+There is no host-provided settings UI for plain panels (the SDK only exposes
+`Settings → Integrations` cards to extensions declaring an `integration` with an
+auth block — wrong tool for a layout toggle). So settings live **inside the panel**
+and persist via host `storage`:
+
+| Setting | Control | Storage key |
+|---|---|---|
+| Split orientation (stacked / side-by-side) | `Layout:` toolbar button | `split` |
+| Tree height (stacked) | drag splitter | `editorHeight` (historical name) |
+| Tree width (side-by-side) | drag splitter | `treeWidth` |
+
 ## Install
 
-1. Clone this repo (or copy the folder) anywhere, e.g.:
-   ```bash
-   git clone https://github.com/PylotLight/openchamber-files-ext.git
+**Option A — git URL** (recommended, supports updates):
+
+1. Open **Settings → Extensions** in OpenChamber (web or desktop).
+2. Paste into **Folder, ZIP, or URL**:
    ```
-2. Install deps and build:
-   ```bash
-   cd openchamber-files-ext
-   npm install
-   npm run build
+   https://github.com/PylotLight/openchamber-files-ext.git
    ```
-3. Open **Settings → Extensions** in OpenChamber (web or desktop).
-4. Add the **absolute path** of this folder.
-5. Approve **Read and write project files** plus the filesystem pattern **`~/**`** (home browse for generic chats).
-6. Open the **Files** icon on the right rail, or full-screen from **Extension pages**.
+3. Approve **Read and write project files** plus the filesystem pattern **`~/**`**.
+4. Open the **Files** icon on the right rail, or full-screen from **Extension pages**.
+5. Updates: **check for updates** in Settings → Extensions (bump-driven — new
+   releases raise `version` in `package.json`).
+
+**Option B — local folder** (for development):
+
+1. Clone the repo and build (`npm install && npm run build`).
+2. Add the folder's **absolute path** in Settings → Extensions.
+3. Folder installs run from disk — just rebuild and reload the panel after changes.
 
 > Re-installing after a version bump may re-prompt for the filesystem pattern.
 

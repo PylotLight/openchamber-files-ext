@@ -110,10 +110,14 @@ let activePath: string | null = null;
 let fileSaving = false;
 let paintGen = 0;
 let treeHeight = 280; // tree pane height; persisted under the historical storage key "editorHeight"
+type Split = "horizontal" | "vertical"; // "horizontal" = tree above editor, "vertical" = tree left of editor
+let split: Split = "horizontal";
+let treeWidth = 260; // tree pane width in vertical split; persisted as "treeWidth"
 
 const els = {
   toolbar: document.createElement("div"),
   search: document.createElement("div"),
+  body: document.createElement("div"),
   tree: document.createElement("div"),
   splitter: document.createElement("div"),
   editor: document.createElement("div"),
@@ -127,6 +131,7 @@ let stripEl: HTMLElement | null = null;
 let titleEl: HTMLElement | null = null;
 let upBtn: ReturnType<typeof mountButton> | undefined;
 let crumbsEl: HTMLElement | null = null;
+let splitBtn: ReturnType<typeof mountButton> | undefined;
 let rootToggleBtn: ReturnType<typeof mountButton> | undefined;
 
 let cm: EditorView | null = null;
@@ -461,14 +466,48 @@ const showEditor = (show: boolean) => {
   els.editor.classList.add("oc-files-editor");
   els.editor.style.display = show ? "flex" : "none";
   els.splitter.style.display = show ? "block" : "none";
+  if (split === "vertical") {
+    if (show) {
+      const rootW = rootEl!.clientWidth || 900;
+      const maxTree = Math.max(200, Math.floor(rootW * 0.6));
+      const treeW = Math.min(maxTree, Math.max(160, treeWidth));
+      els.tree.style.flex = `0 0 ${treeW}px`;
+      els.tree.style.width = `${treeW}px`;
+      els.tree.style.height = "auto";
+      els.tree.style.minWidth = "160px";
+      els.tree.style.maxWidth = `${maxTree}px`;
+      els.tree.style.minHeight = "0";
+      els.tree.style.maxHeight = "none";
+      els.editor.style.flex = "1 1 auto";
+      els.editor.style.width = "auto";
+      els.editor.style.height = "auto";
+      els.editor.style.minWidth = "0";
+      els.editor.style.minHeight = "0";
+      els.editor.style.overflow = "hidden";
+      cm?.requestMeasure();
+    } else {
+      els.tree.style.flex = "1 1 auto";
+      els.tree.style.width = "auto";
+      els.tree.style.minWidth = "0";
+      els.tree.style.maxWidth = "none";
+      els.editor.style.flex = "0 0 auto";
+      els.editor.style.width = "0px";
+      els.editor.style.minWidth = "0px";
+      els.editor.style.overflow = "hidden";
+    }
+    return;
+  }
   if (show) {
     const rootH = rootEl!.clientHeight || 800;
     const maxTree = Math.max(120, Math.floor(rootH * 0.75));
     const treeH = Math.min(maxTree, Math.max(80, treeHeight));
     els.tree.style.flex = `0 0 ${treeH}px`;
     els.tree.style.height = `${treeH}px`;
+    els.tree.style.width = "auto";
     els.tree.style.minHeight = "80px";
     els.tree.style.maxHeight = `${maxTree}px`;
+    els.tree.style.minWidth = "0";
+    els.tree.style.maxWidth = "none";
     els.editor.style.flex = "1 1 auto";
     els.editor.style.height = "auto";
     els.editor.style.minHeight = "200px";
@@ -484,6 +523,24 @@ const showEditor = (show: boolean) => {
     els.editor.style.minHeight = "0px";
     els.editor.style.overflow = "hidden";
   }
+};
+
+const splitLabel = () =>
+  split === "vertical" ? "Layout: Side-by-side" : "Layout: Stacked";
+
+// Apply split orientation to the body container + splitter chrome, then relayout.
+const applySplit = () => {
+  const vertical = split === "vertical";
+  els.body.style.flexDirection = vertical ? "row" : "column";
+  els.splitter.style.width = vertical ? "6px" : "auto";
+  els.splitter.style.height = vertical ? "auto" : "6px";
+  els.splitter.style.flex = "0 0 6px";
+  els.splitter.style.cursor = vertical ? "col-resize" : "row-resize";
+  els.editor.style.borderTop = vertical
+    ? "none"
+    : "1px solid var(--oc-border, #333)";
+  splitBtn?.update({ label: splitLabel() });
+  showEditor(Boolean(activeTab()));
 };
 
 const styleUi = () => {
@@ -1105,6 +1162,17 @@ const buildToolbar = () => {
       void paintTree();
     },
   });
+
+  splitBtn = mountButton(els.toolbar, {
+    label: splitLabel(),
+    size: "xs",
+    variant: "ghost",
+    onClick: () => {
+      split = split === "horizontal" ? "vertical" : "horizontal";
+      void host.storage.set("split", split);
+      applySplit();
+    },
+  });
 };
 
 const updateToolbar = () => {
@@ -1122,6 +1190,8 @@ const updateToolbar = () => {
   }
 
   upBtn!.update({ disabled: !currentPath });
+
+  splitBtn!.update({ label: splitLabel() });
 
   clear(crumbsEl!);
   for (const crumb of breadcrumbPaths(currentPath)) {
@@ -1158,6 +1228,14 @@ const styleEls = () => {
   css(els.search, {
     padding: "8px 10px",
     borderBottom: "1px solid var(--oc-border, #333)",
+  });
+  css(els.body, {
+    display: "flex",
+    flexDirection: "column",
+    flex: "1 1 auto",
+    minHeight: "0",
+    minWidth: "0",
+    overflow: "hidden",
   });
   css(els.tree, {
     flex: "1 1 auto",
@@ -1216,27 +1294,38 @@ const styleEls = () => {
     } catch {
       /* ignore */
     }
-    const startY = event.clientY;
-    const startH =
-      Number.parseFloat(els.tree.style.height) ||
-      treeHeight ||
-      Math.round((rootEl!.clientHeight || 800) * 0.32);
-    const rootH = rootEl!.clientHeight || 800;
-    const max = Math.max(120, Math.floor(rootH * 0.75));
-    const min = 80;
+    const vertical = split === "vertical";
+    const startPos = vertical ? event.clientX : event.clientY;
+    const startSize = vertical
+      ? Number.parseFloat(els.tree.style.width) ||
+        treeWidth ||
+        Math.round((rootEl!.clientWidth || 900) * 0.3)
+      : Number.parseFloat(els.tree.style.height) ||
+        treeHeight ||
+        Math.round((rootEl!.clientHeight || 800) * 0.32);
+    const total = vertical
+      ? rootEl!.clientWidth || 900
+      : rootEl!.clientHeight || 800;
+    const max = vertical
+      ? Math.max(200, Math.floor(total * 0.6))
+      : Math.max(120, Math.floor(total * 0.75));
+    const min = vertical ? 160 : 80;
     let raf = 0;
-    let lastY = startY;
+    let lastPos = startPos;
     const apply = () => {
       raf = 0;
-      const h = Math.min(max, Math.max(min, startH + (lastY - startY)));
-      treeHeight = h;
-      els.tree.style.flex = `0 0 ${h}px`;
-      els.tree.style.height = `${h}px`;
-      els.tree.style.maxHeight = `${h}px`;
-      els.tree.style.minHeight = `${min}px`;
+      const size = Math.min(max, Math.max(min, startSize + (lastPos - startPos)));
+      els.tree.style.flex = `0 0 ${size}px`;
+      if (vertical) {
+        treeWidth = size;
+        els.tree.style.width = `${size}px`;
+      } else {
+        treeHeight = size;
+        els.tree.style.height = `${size}px`;
+      }
     };
     const onMove = (move: PointerEvent) => {
-      lastY = move.clientY;
+      lastPos = vertical ? move.clientX : move.clientY;
       if (!raf) raf = requestAnimationFrame(apply);
     };
     const onUp = (up: PointerEvent) => {
@@ -1256,7 +1345,10 @@ const styleEls = () => {
       els.splitter.removeEventListener("pointerup", onUp);
       els.splitter.removeEventListener("pointercancel", onUp);
       cm?.requestMeasure();
-      void host.storage.set("editorHeight", treeHeight);
+      void host.storage.set(
+        vertical ? "treeWidth" : "editorHeight",
+        vertical ? treeWidth : treeHeight,
+      );
       paintStatus();
     };
     els.splitter.addEventListener("pointermove", onMove);
@@ -1272,9 +1364,10 @@ const mountOnce = () => {
   styleEls();
   rootEl!.appendChild(els.toolbar);
   rootEl!.appendChild(els.search);
-  rootEl!.appendChild(els.tree);
-  rootEl!.appendChild(els.splitter);
-  rootEl!.appendChild(els.editor);
+  rootEl!.appendChild(els.body);
+  els.body.appendChild(els.tree);
+  els.body.appendChild(els.splitter);
+  els.body.appendChild(els.editor);
   rootEl!.appendChild(els.status);
 
   searchHandle = mountSearchField(els.search, {
@@ -1297,6 +1390,25 @@ const mountOnce = () => {
         treeHeight = value;
       }
       showEditor(Boolean(activeTab()));
+    })
+    .catch(() => {});
+
+  void host.storage
+    .get("treeWidth")
+    .then((value) => {
+      if (typeof value === "number" && value >= 160 && value <= 1600) {
+        treeWidth = value;
+      }
+    })
+    .catch(() => {});
+
+  void host.storage
+    .get("split")
+    .then((value) => {
+      if (value === "vertical" || value === "horizontal") {
+        split = value;
+      }
+      applySplit();
     })
     .catch(() => {});
 
