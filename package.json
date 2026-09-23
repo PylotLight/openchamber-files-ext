@@ -1,6 +1,6 @@
 {
   "name": "files-nav",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Files panel extension for OpenChamber: project/home file tree with breadcrumbs, search, and a multi-tab CodeMirror editor.",
   "license": "MIT",
