@@ -49,6 +49,10 @@
   },
   "scripts": {
     "build": "openchamber-guest-bundle panel/main.ts panel/main.js",
-    "validate": "node scripts/validate-manifest.mjs"
+    "validate": "bun scripts/validate-manifest.mjs",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.14.5"
   }
 }

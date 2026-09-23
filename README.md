@@ -47,7 +47,7 @@ and persist via host `storage`:
 
 **Option B — local folder** (for development):
 
-1. Clone the repo and build (`npm install && npm run build`).
+1. Clone the repo and build (`bun install && bun run build`).
 2. Add the folder's **absolute path** in Settings → Extensions.
 3. Folder installs run from disk — just rebuild and reload the panel after changes.
 
@@ -55,10 +55,13 @@ and persist via host `storage`:
 
 ## Development
 
+This repo uses [Bun](https://bun.sh).
+
 ```bash
-npm install        # install deps
-npm run build      # bundle panel/main.ts -> panel/main.js (IIFE)
-npm run validate   # validate the extension manifest
+bun install          # install deps
+bun run build        # bundle panel/main.ts -> panel/main.js (IIFE)
+bun run validate     # validate the extension manifest
+bun test             # mock-host regression tests (test/)
 ```
 
 Ship the built `panel/main.js` — OpenChamber does not compile TypeScript on install, so the bundle must be committed.
@@ -70,6 +73,9 @@ panel/
   index.html   # panel entry: full-height #root, loads main.js
   main.ts      # all panel logic (tree, toolbar, tabs, CodeMirror editor)
   main.js      # built bundle (committed)
+test/
+  harness.ts        # mock host: boots the real bundle under happy-dom
+  first-open.test.ts  # first-open regression (incl. slow-storage race)
 docs/
   ARCHITECTURE.md   # module map + state/rendering model
   ROADMAP.md        # planned features, ranked by feasibility

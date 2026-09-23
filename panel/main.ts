@@ -459,6 +459,12 @@ const ensureCm = (tab: Tab) => {
     }),
   });
   applyingDoc = false;
+  const view = cm;
+  // The view is often created in the same frame its container unhides;
+  // re-measure after layout settles so first paint isn't blank.
+  requestAnimationFrame(() => {
+    if (cm === view) view.requestMeasure();
+  });
   return cm;
 };
 
@@ -485,6 +491,7 @@ const showEditor = (show: boolean) => {
       els.editor.style.minHeight = "0";
       els.editor.style.overflow = "hidden";
       cm?.requestMeasure();
+      requestAnimationFrame(() => cm?.requestMeasure());
     } else {
       els.tree.style.flex = "1 1 auto";
       els.tree.style.width = "auto";
@@ -513,6 +520,7 @@ const showEditor = (show: boolean) => {
     els.editor.style.minHeight = "200px";
     els.editor.style.overflow = "hidden";
     cm?.requestMeasure();
+    requestAnimationFrame(() => cm?.requestMeasure());
   } else {
     els.tree.style.flex = "1 1 auto";
     els.tree.style.height = "auto";
@@ -1050,6 +1058,7 @@ const openFileAt = async (path: string, force = false) => {
     if (view && !tab.error) {
       setDoc(view, tab.draft, tab.path);
       view.dispatch({ selection: { anchor: 0 } });
+      view.requestMeasure();
     }
     paintStatus();
     patchTreeState();
@@ -1064,6 +1073,7 @@ const activateTab = async (path: string) => {
   paintEditor();
   if (tab && cm && !tab.error) {
     setDoc(cm, tab.draft, tab.path);
+    cm.requestMeasure();
   }
   patchTreeState();
   paintStatus();
@@ -1077,7 +1087,10 @@ const closeTab = (path: string) => {
   }
   paintEditor();
   const tab = activeTab();
-  if (tab && cm && !tab.error) setDoc(cm, tab.draft, tab.path);
+  if (tab && cm && !tab.error) {
+    setDoc(cm, tab.draft, tab.path);
+    cm.requestMeasure();
+  }
   patchTreeState();
   paintStatus();
 };
