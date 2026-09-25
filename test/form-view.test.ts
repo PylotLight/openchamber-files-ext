@@ -444,6 +444,80 @@ describe("add provider flow", () => {
   }, 20000);
 });
 
+describe("text <-> form round trip", () => {
+  test("form edits appear in the text editor and survive switching back", async () => {
+    const panel = await openConfig();
+    openPanel.push(panel);
+    await clickForm(panel);
+
+    // Form -> text.
+    clickButton(panel, "+ Add provider");
+    const modal = await panel.waitFor(() => panel.doc.querySelector(".ocf-modal"));
+    if (!modal) throw new Error("modal did not open");
+    type(panel, inputByLabel(panel, "Provider id", modal), "round-trip");
+    clickButton(panel, "Add endpoint");
+    await panel.waitFor(() => panel.doc.querySelector(".ft-dot"), 8000);
+
+    clickButton(panel, "Text");
+    await panel.waitFor(() => !panel.doc.querySelector(".ocf-scroll"), 8000);
+    const editorText = panel.doc.querySelector(".cm-content")?.textContent ?? "";
+    expect(editorText).toContain("round-trip");
+    // The comment survived the form's surgical edit.
+    expect(editorText).toContain("// opencode config — keep this comment");
+
+    // Text -> form: the form is rebuilt from the same buffer, not from disk.
+    clickButton(panel, "Form");
+    await panel.waitFor(() => panel.doc.querySelector(".ocf-scroll"), 8000);
+    expect(fieldLabels(panel)).toContain("round-trip");
+    expect(panel.errors).toEqual([]);
+  }, 20000);
+
+  test("an external file change reaches the form on reload", async () => {
+    const files = {
+      "": { kind: "directory" as const, entries: ["opencode.json"] },
+      "opencode.json": {
+        kind: "file" as const,
+        content: '{"$schema":"https://opencode.ai/config.json","username":"before"}',
+      },
+    };
+    const panel = await bootPanel({
+      directory: "/home/light/.config/openchamber/chats/session-abc123",
+      files,
+    });
+    openPanel.push(panel);
+    const row = await panel.waitFor(() =>
+      panel.doc.querySelector<HTMLElement>('.ft-row[data-path="opencode.json"]'),
+    );
+    row.dispatchEvent(new panel.win.MouseEvent("click", { bubbles: true }));
+    await panel.waitFor(() => panel.doc.querySelector(".cm-content"));
+    clickButton(panel, "Form");
+    await panel.waitFor(() => panel.doc.querySelector(".ocf-scroll"));
+
+    // Make the tab dirty, then change the file underneath the panel.
+    type(panel, inputByLabel(panel, "Username"), "typed-in-form");
+    await panel.waitFor(() => panel.doc.querySelector(".ft-dot"), 8000);
+    files["opencode.json"] = {
+      kind: "file",
+      content: '{"$schema":"https://opencode.ai/config.json","username":"after"}',
+    };
+
+    // Reload is the discard button, so it only acts on a dirty tab.
+    clickButton(panel, "Text");
+    await panel.waitFor(() => !panel.doc.querySelector(".ocf-scroll"), 8000);
+    clickButton(panel, "Reload");
+    await panel.waitFor(
+      () => (panel.doc.querySelector(".cm-content")?.textContent ?? "").includes("after"),
+      8000,
+    );
+
+    clickButton(panel, "Form");
+    await panel.waitFor(() => panel.doc.querySelector(".ocf-scroll"), 8000);
+    const values = inputValues(panel);
+    expect(values).toContain("after");
+    expect(values).not.toContain("typed-in-form");
+  }, 20000);
+});
+
 describe("catalog", () => {
   test("loads the vendored catalog and searches it", async () => {
     const panel = await openConfig();
