@@ -41,6 +41,8 @@ import { go } from "@codemirror/legacy-modes/mode/go";
 import { rust } from "@codemirror/legacy-modes/mode/rust";
 import { ruby } from "@codemirror/legacy-modes/mode/ruby";
 import { json as jsonLegacy } from "@codemirror/legacy-modes/mode/javascript";
+import { createFormView, type FormView } from "./form/view";
+import { parseDoc } from "./form/core";
 
 type Entry = { name: string; kind: "file" | "directory" | "other" };
 type RootKind = "project" | "home";
@@ -52,6 +54,8 @@ type Tab = {
   error: string | null;
   edited: boolean;
   synced: boolean;
+  /** "form" shows the schema-driven editor for opencode config files. */
+  view: "text" | "form";
 };
 
 const host = connectHost();
@@ -141,6 +145,30 @@ let editorPath: string | null = null;
 let applyingDoc = false;
 let draftSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
+let formView: FormView | null = null;
+let formHost: HTMLElement | null = null;
+let viewBtn: ReturnType<typeof mountButton> | undefined;
+
+const CONFIG_SCHEMA_URL = "opencode.ai/config.json";
+
+/** The form only makes sense for an opencode config, by name or by $schema. */
+const formEligible = (path: string, text: string): boolean => {
+  const name = (path.split("/").pop() || path).toLowerCase();
+  if (name === "opencode.json" || name === "opencode.jsonc") return true;
+  if (!/\.jsonc?$/i.test(name)) return false;
+  if (text.includes(CONFIG_SCHEMA_URL)) return true;
+  // A config mid-edit may not have $schema yet; an existing `provider` key is
+  // a strong enough signal.
+  const parsed = parseDoc(text);
+  return parsed.data !== null && typeof parsed.data === "object" && "provider" in parsed.data;
+};
+
+const activeFormEligible = (): boolean => {
+  const tab = activeTab();
+  if (!tab || tab.error) return false;
+  return formEligible(tab.path, tab.draft || tab.raw);
+};
+
 const langCompartment = new Compartment();
 const readOnlyCompartment = new Compartment();
 
@@ -227,7 +255,7 @@ const isDirty = (t: Tab): boolean =>
 const flushDraft = (path: string | null) => {
   if (!cm || !path || applyingDoc) return;
   const t = tabs.find((tab) => tab.path === path);
-  if (!t) return;
+  if (!t || t.view === "form") return;
   t.draft = cm.state.doc.toString();
   t.synced = true;
   t.edited = t.draft !== t.raw;
@@ -575,6 +603,9 @@ const styleUi = () => {
 .oc-cm-host .cm-editor { flex:1 1 auto; min-height:0; height:100%; }
 .oc-cm-host .cm-editor.cm-focused { outline:none; }
 .oc-cm-host[hidden] { display:none; }
+.ocf-host { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; border-top:1px solid var(--oc-border, #333); }
+.ocf-host[hidden] { display:none; }
+.ocf-host > .ocf-scroll { min-height:0; }
 .oc-crumbs { display:flex; align-items:center; gap:4px; flex:1 1 auto; flex-wrap:wrap; font-size:12px; min-width:0; }
 .oc-crumb { border:none; background:transparent; color:inherit; cursor:pointer; padding:2px 4px; border-radius:4px; font:inherit; opacity:0.85; }
 .oc-crumb:hover { background: var(--oc-hover, rgba(255,255,255,0.08)); }
@@ -828,17 +859,25 @@ const paintStrip = () => {
   }
 };
 
+const destroyFormView = () => {
+  formView?.destroy();
+  formView = null;
+};
+
 const destroyEditorDom = () => {
   if (cm) {
     cm.destroy();
     cm = null;
   }
+  destroyFormView();
   cmHost = null;
+  formHost = null;
   editorPath = null;
   stripEl = null;
   titleEl = null;
   saveBtn = undefined;
   reloadBtn = undefined;
+  viewBtn = undefined;
   bannerShown = false;
   clear(els.editor);
 };
@@ -869,13 +908,51 @@ const showReadError = (tab: Tab) => {
   });
 };
 
+/** Mount the schema-driven editor for the active tab's text. */
+const mountFormView = (tab: Tab) => {
+  destroyFormView();
+  if (!formHost) return;
+  formHost.hidden = false;
+  if (cmHost) cmHost.hidden = true;
+  formView = createFormView({
+    getText: () => tab.draft,
+    setText: (next) => {
+      tab.draft = next;
+      tab.synced = true;
+      tab.edited = next !== tab.raw;
+      syncChrome(tab);
+      patchTreeState();
+      paintStatus();
+    },
+    loadExpanded: async () => {
+      const stored = await host.storage.get("form.expanded");
+      return Array.isArray(stored) ? stored.filter((key): key is string => typeof key === "string") : [];
+    },
+    saveExpanded: (keys) => {
+      void host.storage.set("form.expanded", keys);
+    },
+  });
+  formHost.appendChild(formView.element);
+};
+
+const setTabView = (tab: Tab, view: "text" | "form") => {
+  if (tab.view === view) return;
+  if (view === "form" && !formEligible(tab.path, tab.draft || tab.raw)) return;
+  // Text -> form: make sure the buffer holds the latest keystrokes.
+  if (view === "form") flushDraft(tab.path);
+  tab.view = view;
+  paintEditor();
+};
+
 const buildEditorChrome = (tab: Tab) => {
   clear(els.editor);
   if (cm) {
     cm.destroy();
     cm = null;
   }
+  destroyFormView();
   cmHost = null;
+  formHost = null;
   editorPath = tab.path;
   bannerShown = false;
 
@@ -908,6 +985,15 @@ const buildEditorChrome = (tab: Tab) => {
       void openFileAt(tab.path, true);
     },
   });
+  if (formEligible(tab.path, tab.draft || tab.raw)) {
+    viewBtn = mountButton(head, {
+      label: tab.view === "form" ? "Text" : "Form",
+      size: "xs",
+      variant: tab.view === "form" ? "secondary" : "outline",
+      title: "Switch between the raw file and the settings form",
+      onClick: () => setTabView(tab, tab.view === "form" ? "text" : "form"),
+    });
+  }
   mountButton(head, {
     label: "Close",
     size: "xs",
@@ -915,7 +1001,17 @@ const buildEditorChrome = (tab: Tab) => {
     onClick: () => closeTab(tab.path),
   });
 
-  ensureCm(tab);
+  formHost = document.createElement("div");
+  formHost.className = "ocf-host";
+  els.editor.appendChild(formHost);
+
+  // Don't mount the form against an empty buffer: wait for the read, then
+  // build it from the real text (paintEditor re-runs when loading finishes).
+  if (tab.view === "form" && !tab.loading) {
+    mountFormView(tab);
+  } else {
+    ensureCm(tab);
+  }
 };
 
 const syncChrome = (tab: Tab) => {
@@ -923,6 +1019,13 @@ const syncChrome = (tab: Tab) => {
   const dirty = isDirty(tab);
   saveBtn?.update({ disabled: !dirty || fileSaving || tab.loading, loading: fileSaving });
   reloadBtn?.update({ disabled: fileSaving || tab.loading || !dirty });
+  const eligible = formEligible(tab.path, tab.draft || tab.raw);
+  viewBtn?.update({
+    label: tab.view === "form" ? "Text" : "Form",
+    variant: tab.view === "form" ? "secondary" : "outline",
+    disabled: !eligible,
+  });
+  if (formView) formView.sync({ repaint: false });
   if (cm) {
     const ro = tab.loading || fileSaving;
     cm.dispatch({
@@ -958,11 +1061,11 @@ const paintEditor = () => {
   }
 
   const needChrome =
-    !cm ||
     editorPath !== tab.path ||
     bannerShown ||
     !stripEl ||
-    !titleEl;
+    !titleEl ||
+    (tab.view === "form" ? !formView && !tab.loading : !cm);
   if (needChrome) {
     buildEditorChrome(tab);
   } else {
@@ -1008,6 +1111,7 @@ const openFileAt = async (path: string, force = false) => {
       error: null,
       edited: false,
       synced: true,
+      view: "text",
     };
     tabs = [...tabs, tab];
   }
@@ -1055,11 +1159,12 @@ const openFileAt = async (path: string, force = false) => {
   if (activePath === path) {
     paintEditor();
     const view = cm;
-    if (view && !tab.error) {
+    if (view && !tab.error && tab.view === "text") {
       setDoc(view, tab.draft, tab.path);
       view.dispatch({ selection: { anchor: 0 } });
       view.requestMeasure();
     }
+    if (formView) formView.sync();
     paintStatus();
     patchTreeState();
   }
@@ -1071,7 +1176,7 @@ const activateTab = async (path: string) => {
   activePath = path;
   const tab = activeTab();
   paintEditor();
-  if (tab && cm && !tab.error) {
+  if (tab && cm && !tab.error && tab.view === "text") {
     setDoc(cm, tab.draft, tab.path);
     cm.requestMeasure();
   }
@@ -1087,7 +1192,7 @@ const closeTab = (path: string) => {
   }
   paintEditor();
   const tab = activeTab();
-  if (tab && cm && !tab.error) {
+  if (tab && cm && !tab.error && tab.view === "text") {
     setDoc(cm, tab.draft, tab.path);
     cm.requestMeasure();
   }
@@ -1098,7 +1203,9 @@ const closeTab = (path: string) => {
 const saveFile = async () => {
   const tab = activeTab();
   if (!tab || fileSaving) return;
-  if (cm) {
+  // In form view the form writes straight into tab.draft; in text view the
+  // CodeMirror buffer is authoritative.
+  if (cm && tab.view === "text") {
     tab.draft = cm.state.doc.toString();
     tab.synced = true;
     tab.edited = tab.draft !== tab.raw;

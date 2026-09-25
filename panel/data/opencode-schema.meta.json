@@ -1,0 +1,8 @@
+{
+  "source": "https://opencode.ai/config.json",
+  "fetchedAt": "2026-09-25T04:20:15.154Z",
+  "strippedRemoteRefs": [
+    "https://models.dev/model-schema.json#/$defs/Model"
+  ],
+  "localRefCount": 49
+}

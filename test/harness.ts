@@ -45,11 +45,13 @@ const BASE_KEYS = [
   "HTMLElement", "Element", "Node", "Text", "Document", "DocumentFragment",
   "Range", "Selection",
   "getComputedStyle", "requestAnimationFrame", "cancelAnimationFrame",
-  "matchMedia", "DOMParser",
+  "matchMedia", "DOMParser", "fetch",
 ];
 
 export const bootPanel = async (opts: BootOptions) => {
   const errors: string[] = [];
+  const writes: Array<{ path: string; content: string }> = [];
+  const fetches: string[] = [];
   const win = new Window({ url: "https://host/panel" }) as unknown as Record<string, unknown>;
   const doc = win.document as Document;
   doc.body.innerHTML = '<div id="root"></div>';
@@ -114,9 +116,14 @@ export const bootPanel = async (opts: BootOptions) => {
             }
             break;
           }
-          case "file-write":
+          case "file-write": {
+            const target = toUi(payload.path);
+            const content = (msg.payload as Record<string, string>).content ?? "";
+            writes.push({ path: target, content });
+            if (opts.files[target]) opts.files[target] = { kind: "file", content };
             answer({ written: true });
             break;
+          }
           case "storage": {
             const op = payload.op;
             if (op === "get") {
@@ -167,6 +174,20 @@ export const bootPanel = async (opts: BootOptions) => {
   g.self = win;
   g.document = doc;
 
+  // The form lazily fetches panel/data/models.json same-origin; serve it from
+  // disk so the real catalog code path runs under test.
+  const realFetch = globalThis.fetch;
+  g.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    fetches.push(url);
+    if (url.includes("data/models.json")) {
+      const body = readFileSync(join(root, "panel", "data", "models.json"), "utf8");
+      return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (realFetch) return realFetch(input as RequestInfo, init);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
   const onError = (e: Event) => {
     errors.push(`window.onerror: ${(e as ErrorEvent).message ?? e}`);
   };
@@ -191,7 +212,7 @@ export const bootPanel = async (opts: BootOptions) => {
   };
 
   return {
-    win, doc, sleep, waitFor, errors, store,
+    win, doc, sleep, waitFor, errors, store, writes, fetches,
     close: async () => {
       // Restore previous globals only after the guest is done (its async
       // continuations resolve document/window lazily).

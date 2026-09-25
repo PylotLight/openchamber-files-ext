@@ -1,8 +1,8 @@
 {
   "name": "files-nav",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
-  "description": "Files panel extension for OpenChamber: project/home file tree with breadcrumbs, search, and a multi-tab CodeMirror editor.",
+  "description": "Files panel extension for OpenChamber: project/home file tree with breadcrumbs, search, a multi-tab CodeMirror editor, and a form view for opencode config.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -45,12 +45,16 @@
     "@codemirror/view": "^6.43.12",
     "@lezer/highlight": "^1.2.3",
     "@openchamber/sdk": "^1.24.2",
-    "codemirror": "^6.0.2"
+    "ajv": "^8",
+    "codemirror": "^6.0.2",
+    "jsonc-parser": "^3.3.1"
   },
   "scripts": {
     "build": "openchamber-guest-bundle panel/main.ts panel/main.js",
     "validate": "bun scripts/validate-manifest.mjs",
-    "test": "bun test"
+    "test": "bun test",
+    "sync:schema": "bun scripts/sync-schema.ts",
+    "sync:models": "bun scripts/sync-models.ts"
   },
   "devDependencies": {
     "happy-dom": "^20.14.5"
